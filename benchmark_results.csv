@@ -1,0 +1,46 @@
+lang,bin,workers,run,wall_seconds,usr_sec,sys_sec,max_rss_kb,vol_ctx_switches,bin_size_bytes,open_ports_count
+portscan-go,portscan-go,50,1,0.30,0.00,0.00,8392,0,2490660,0
+portscan-go,portscan-go,50,2,0.30,0.00,0.00,8392,1,2490660,0
+portscan-go,portscan-go,50,3,0.30,0.00,0.00,8432,1,2490660,0
+portscan-go,portscan-go,200,1,0.30,0.00,0.00,10240,5,2490660,0
+portscan-go,portscan-go,200,2,0.30,0.00,0.00,10324,3,2490660,0
+portscan-go,portscan-go,200,3,0.30,0.00,0.00,10332,3,2490660,0
+portscan-go,portscan-go,500,1,0.30,0.00,0.00,10460,1,2490660,0
+portscan-go,portscan-go,500,2,0.30,0.00,0.00,10344,4,2490660,0
+portscan-go,portscan-go,500,3,0.30,0.00,0.00,10336,2,2490660,0
+portscan-go,portscan-go,1000,1,0.30,0.00,0.00,12532,7,2490660,0
+portscan-go,portscan-go,1000,2,0.30,0.00,0.00,12432,7,2490660,0
+portscan-go,portscan-go,1000,3,0.30,0.01,0.00,12400,2,2490660,0
+portscan-go,portscan-go,2000,1,0.30,0.01,0.00,14496,7,2490660,0
+portscan-go,portscan-go,2000,2,0.30,0.01,0.00,14444,6,2490660,0
+portscan-go,portscan-go,2000,3,0.30,0.01,0.00,14492,5,2490660,0
+portscan-epoll,portscan-epoll,50,1,Command,exited,with,non-zero,status 2,3775968,
+portscan-epoll,portscan-epoll,50,2,Command,exited,with,non-zero,status 2,3775968,
+portscan-epoll,portscan-epoll,50,3,Command,exited,with,non-zero,status 2,3775968,
+portscan-epoll,portscan-epoll,200,1,Command,exited,with,non-zero,status 2,3775968,
+portscan-epoll,portscan-epoll,200,2,Command,exited,with,non-zero,status 2,3775968,
+portscan-epoll,portscan-epoll,200,3,Command,exited,with,non-zero,status 2,3775968,
+portscan-epoll,portscan-epoll,500,1,Command,exited,with,non-zero,status 2,3775968,
+portscan-epoll,portscan-epoll,500,2,Command,exited,with,non-zero,status 2,3775968,
+portscan-epoll,portscan-epoll,500,3,Command,exited,with,non-zero,status 2,3775968,
+portscan-epoll,portscan-epoll,1000,1,Command,exited,with,non-zero,status 2,3775968,
+portscan-epoll,portscan-epoll,1000,2,Command,exited,with,non-zero,status 2,3775968,
+portscan-epoll,portscan-epoll,1000,3,Command,exited,with,non-zero,status 2,3775968,
+portscan-epoll,portscan-epoll,2000,1,Command,exited,with,non-zero,status 2,3775968,
+portscan-epoll,portscan-epoll,2000,2,Command,exited,with,non-zero,status 2,3775968,
+portscan-epoll,portscan-epoll,2000,3,Command,exited,with,non-zero,status 2,3775968,
+portscan-rs,portscan-rs,50,1,0.30,0.00,0.00,3532,0,1710480,0
+portscan-rs,portscan-rs,50,2,0.30,0.00,0.00,3288,1,1710480,0
+portscan-rs,portscan-rs,50,3,0.30,0.00,0.00,3440,0,1710480,0
+portscan-rs,portscan-rs,200,1,0.30,0.00,0.00,3492,1,1710480,0
+portscan-rs,portscan-rs,200,2,0.30,0.00,0.00,3368,1,1710480,0
+portscan-rs,portscan-rs,200,3,0.30,0.00,0.00,3504,0,1710480,0
+portscan-rs,portscan-rs,500,1,0.30,0.00,0.00,3564,0,1710480,0
+portscan-rs,portscan-rs,500,2,0.30,0.00,0.00,3500,1,1710480,0
+portscan-rs,portscan-rs,500,3,0.30,0.00,0.00,3560,1,1710480,0
+portscan-rs,portscan-rs,1000,1,0.30,0.00,0.00,3540,0,1710480,0
+portscan-rs,portscan-rs,1000,2,0.30,0.00,0.00,3364,0,1710480,0
+portscan-rs,portscan-rs,1000,3,0.30,0.00,0.00,3376,0,1710480,0
+portscan-rs,portscan-rs,2000,1,0.30,0.00,0.00,3516,1,1710480,0
+portscan-rs,portscan-rs,2000,2,0.30,0.00,0.00,3520,0,1710480,0
+portscan-rs,portscan-rs,2000,3,0.30,0.00,0.00,3424,2,1710480,0
