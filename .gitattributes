@@ -1,0 +1,23 @@
+# Exclude build outputs and artifacts from GitHub Linguist language stats
+
+# Rust build directory
+rust/target/** linguist-generated=true
+
+# Common compiled/object artifacts
+**/*.o linguist-generated=true
+**/*.a linguist-generated=true
+**/*.so linguist-generated=true
+**/*.rlib linguist-generated=true
+**/*.rmeta linguist-generated=true
+**/*.d linguist-generated=true
+
+# Built binaries
+go/portscan-go linguist-generated=true
+go/portscan-epoll linguist-generated=true
+rust/target/release/portscan-rs linguist-generated=true
+
+# Ignore other cargo build intermediates
+rust/target/**/build/** linguist-generated=true
+rust/target/**/deps/** linguist-generated=true
+rust/target/**/examples/** linguist-generated=true
+rust/target/**/incremental/** linguist-generated=true
