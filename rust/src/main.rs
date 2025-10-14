@@ -43,6 +43,7 @@ struct ResultRec {
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let args = Args::parse();
+    let started = std::time::Instant::now();
 
     if args.end < args.start {
         eprintln!("end must be >= start");
@@ -76,7 +77,7 @@ async fn main() {
 
         let handle = tokio::spawn(async move {
             // Acquire an owned permit; it releases automatically when dropped.
-            let permit = sem_clone.acquire_owned().await.unwrap();
+            let _permit = sem_clone.acquire_owned().await.unwrap();
             let addr = format!("{}:{}", ip_cloned, port);
 
             // attempt connect with timeout
@@ -108,6 +109,7 @@ async fn main() {
 
     results.sort_by_key(|r| r.port);
     let open: Vec<_> = results.into_iter().filter(|r| r.status == "open").collect();
+    let open_len = open.len();
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&open).unwrap());
@@ -126,4 +128,18 @@ async fn main() {
             println!("{} - {}", r.port, r.status);
         }
     }
+
+    // summary similar to nmap
+    let elapsed = started.elapsed().as_secs_f64();
+    let mut elapsed_safe = elapsed;
+    if elapsed_safe <= 0.0 { elapsed_safe = 1e-9; }
+    let total_ports = (args.end - args.start + 1) as f64;
+    let rate = total_ports / elapsed_safe;
+    println!(
+        "\nScanned {} ports in {:.2} seconds ({:.1} ports/sec). Open: {}",
+        total_ports as u16,
+        elapsed,
+        rate,
+        open_len
+    );
 }

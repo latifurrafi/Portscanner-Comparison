@@ -69,7 +69,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "end must be >= start")
 		os.Exit(2)
 	}
-    ips, err := net.LookupHost(host)
+	// mark start time for summary
+	begin := time.Now()
+
+	ips, err := net.LookupHost(host)
 	if err != nil || len(ips) == 0 {
 		fmt.Fprintf(os.Stderr, "failed to resolve host: %v\n", err)
 		os.Exit(1)
@@ -99,15 +102,21 @@ func main() {
 		close(portsCh)
 	}()
 
+    // Collect results concurrently to avoid blocking workers on full channel
+    var resList []Result
+    var collectWg sync.WaitGroup
+    collectWg.Add(1)
+    go func() {
+        defer collectWg.Done()
+        for r := range resultsCh {
+            resList = append(resList, r)
+        }
+    }()
+
     // Wait for workers to finish and close results
     wg.Wait()
     close(resultsCh)
-
-    // Collect results after channel is closed
-    var resList []Result
-    for r := range resultsCh {
-        resList = append(resList, r)
-    }
+    collectWg.Wait()
 
 	// sort by port
 	sort.Slice(resList, func(i, j int) bool { return resList[i].Port < resList[j].Port })
@@ -139,4 +148,13 @@ func main() {
 			fmt.Printf("%d - %s\n", o.Port, o.Status)
 		}
 	}
+
+	// summary similar to nmap
+	elapsed := time.Since(begin).Seconds()
+	if elapsed < 1e-9 {
+		elapsed = 1e-9
+	}
+	totalPorts := (end - start) + 1
+	rate := float64(totalPorts) / elapsed
+	fmt.Printf("\nScanned %d ports in %.2f seconds (%.1f ports/sec). Open: %d\n", totalPorts, elapsed, rate, len(open))
 }
