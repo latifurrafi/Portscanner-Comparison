@@ -19,15 +19,30 @@ type Result struct {
 	Banner string `json:"banner,omitempty"`
 }
 
-func worker(ip string, ports <-chan int, results chan<- Result, wg *sync.WaitGroup, timeout time.Duration) {
+func worker(ip string, ports <-chan int, results chan<- Result, wg *sync.WaitGroup, timeout time.Duration, retries int) {
     defer wg.Done()
     for p := range ports {
         address := net.JoinHostPort(ip, strconv.Itoa(p))
-        conn, err := net.DialTimeout("tcp", address, timeout)
+
+        var conn net.Conn
+        var err error
+        attempts := retries + 1
+        for try := 0; try < attempts; try++ {
+            conn, err = net.DialTimeout("tcp", address, timeout)
+            if err == nil {
+                break
+            }
+            if ne, ok := err.(net.Error); ok && ne.Timeout() && try+1 < attempts {
+                // retry on timeouts
+                continue
+            }
+            break
+        }
         if err != nil {
             results <- Result{Port: p, Status: "closed"}
             continue
         }
+
         _ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
         buf := make([]byte, 256)
         n, _ := conn.Read(buf)
@@ -40,12 +55,47 @@ func worker(ip string, ports <-chan int, results chan<- Result, wg *sync.WaitGro
     }
 }
 
+// estimateTimeout derives a per-host timeout by probing common ports quickly
+func estimateTimeout(ip string, maxTimeout time.Duration) time.Duration {
+    samples := []int{22, 80, 443, 53, 25}
+    var durations []time.Duration
+    for _, sp := range samples {
+        addr := net.JoinHostPort(ip, strconv.Itoa(sp))
+        start := time.Now()
+        _ , err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+        d := time.Since(start)
+        // whether success or error, use elapsed as RTT-ish measure
+        if err == nil {
+            // close immediately if connected
+            // ignore error from Close
+            // conn.Close handled via short lifetime above (not stored)
+        }
+        durations = append(durations, d)
+    }
+    // pick median
+    sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+    median := durations[len(durations)/2]
+    if median < 50*time.Millisecond {
+        median = 50 * time.Millisecond
+    }
+    derived := 3 * median
+    if derived < 150*time.Millisecond {
+        derived = 150 * time.Millisecond
+    }
+    if derived > maxTimeout {
+        derived = maxTimeout
+    }
+    return derived
+}
+
 func main() {
 	var host string
 	var start, end int
 	var workers int
 	var timeoutMs int
 	var outJSON bool
+    var retries int
+    var adaptive bool
 
 	flag.StringVar(&host, "host", "", "target host (ip or domain)")
 	flag.IntVar(&start, "start", 1, "start port")
@@ -53,7 +103,9 @@ func main() {
 	flag.IntVar(&workers, "workers", 500, "max concurrent dial attempts")
 	flag.IntVar(&timeoutMs, "timeout", 300, "connect timeout in ms")
 	flag.BoolVar(&outJSON, "json", false, "output results as JSON")
-	flag.Parse()
+    flag.IntVar(&retries, "retries", 1, "number of retries on timeout")
+    flag.BoolVar(&adaptive, "adaptive", true, "auto-tune timeout based on RTT")
+    flag.Parse()
 
 	if host == "" {
 		fmt.Fprintln(os.Stderr, "host is required. Example: --host scanme.nmap.org")
@@ -72,7 +124,7 @@ func main() {
 	// mark start time for summary
 	begin := time.Now()
 
-	ips, err := net.LookupHost(host)
+    ips, err := net.LookupHost(host)
 	if err != nil || len(ips) == 0 {
 		fmt.Fprintf(os.Stderr, "failed to resolve host: %v\n", err)
 		os.Exit(1)
@@ -89,9 +141,15 @@ func main() {
 	if numWorkers < 1 {
 		numWorkers = 100
 	}
-	for i := 0; i < numWorkers; i++ {
+    // compute dial timeout
+    baseTimeout := time.Duration(timeoutMs) * time.Millisecond
+    dialTimeout := baseTimeout
+    if adaptive {
+        dialTimeout = estimateTimeout(ip, baseTimeout)
+    }
+    for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
-        go worker(ip, portsCh, resultsCh, &wg, time.Duration(timeoutMs)*time.Millisecond)
+        go worker(ip, portsCh, resultsCh, &wg, dialTimeout, retries)
 	}
 
 	// feed ports

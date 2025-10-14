@@ -9,6 +9,27 @@ use tokio::net::TcpStream;
 use tokio::sync::Semaphore;
 use tokio::time::timeout;
 
+fn estimate_timeout(ip: &str, max_timeout: Duration) -> Duration {
+    let samples = [22u16, 80u16, 443u16, 53u16, 25u16];
+    let mut durations = Vec::with_capacity(samples.len());
+    for sp in samples { 
+        let addr = format!("{}:{}", ip, sp);
+        let start = std::time::Instant::now();
+        // Use blocking connect in a tiny tokio::task::block_in_place? Simpler: best-effort async with small timeout
+        // This function runs before we spawn many tasks, so a small block is fine.
+        let _ = std::net::TcpStream::connect_timeout(&addr.parse().ok().unwrap_or_else(|| std::net::SocketAddr::from(([127,0,0,1], sp))), std::time::Duration::from_millis(200));
+        let d = start.elapsed();
+        durations.push(d);
+    }
+    durations.sort();
+    let median = durations[durations.len()/2];
+    let floor = Duration::from_millis(150);
+    let mut derived = median * 3;
+    if derived < floor { derived = floor; }
+    if derived > max_timeout { derived = max_timeout; }
+    derived
+}
+
 #[derive(Parser, Debug)]
 #[command(author, version, about = "High-performance concurrent port scanner (Rust + Tokio)")]
 struct Args {
@@ -31,6 +52,14 @@ struct Args {
 
     #[arg(long)]
     json: bool,
+
+    /// retries on timeout
+    #[arg(long, default_value_t = 1)]
+    retries: usize,
+
+    /// enable adaptive timeout based on RTT probing
+    #[arg(long, default_value_t = true)]
+    adaptive: bool,
 }
 
 #[derive(Serialize)]
@@ -65,10 +94,13 @@ async fn main() {
         }
     };
 
+    // Derive dial timeout: optionally adaptive based on quick probes
+    let base_timeout = Duration::from_millis(args.timeout);
+    let timeout_dur = if args.adaptive { estimate_timeout(&ip, base_timeout) } else { base_timeout };
+
     // Wrap semaphore in Arc so it can be cheaply cloned between tasks
     let sem = Arc::new(Semaphore::new(args.workers));
     let mut handles = Vec::new();
-    let timeout_dur = Duration::from_millis(args.timeout);
 
     for port in args.start..=args.end {
         let sem_clone = Arc::clone(&sem);
@@ -80,21 +112,24 @@ async fn main() {
             let _permit = sem_clone.acquire_owned().await.unwrap();
             let addr = format!("{}:{}", ip_cloned, port);
 
-            // attempt connect with timeout
-            match timeout(timeout_dur, TcpStream::connect(&addr)).await {
-                Ok(Ok(mut stream)) => {
-                    // try small banner read (short deadline)
-                    let mut buf = [0u8; 256];
-                    let banner = match timeout(Duration::from_millis(200), stream.read(&mut buf)).await {
-                        Ok(Ok(n)) if n > 0 => Some(String::from_utf8_lossy(&buf[..n]).to_string()),
-                        _ => None,
-                    };
-                    ResultRec { port, status: "open", banner }
-                }
-                _ => {
-                    ResultRec { port, status: "closed", banner: None }
+            // attempt connect with timeout + retries on timeout
+            let attempts = args.retries + 1;
+            for try_idx in 0..attempts {
+                match timeout(timeout_dur, TcpStream::connect(&addr)).await {
+                    Ok(Ok(mut stream)) => {
+                        let mut buf = [0u8; 256];
+                        let banner = match timeout(Duration::from_millis(200), stream.read(&mut buf)).await {
+                            Ok(Ok(n)) if n > 0 => Some(String::from_utf8_lossy(&buf[..n]).to_string()),
+                            _ => None,
+                        };
+                        return ResultRec { port, status: "open", banner };
+                    }
+                    Ok(Err(_)) => break,        // immediate refused -> closed
+                    Err(_) if try_idx + 1 < attempts => continue, // timeout -> retry
+                    Err(_) => break,
                 }
             }
+            ResultRec { port, status: "closed", banner: None }
         });
 
         handles.push(handle);

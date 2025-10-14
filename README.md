@@ -56,13 +56,13 @@ This will produce:
 - Go scanner:
 
 ```bash
-./go/portscan-go --host scanme.nmap.org --start 1 --end 1024 --workers 500 --timeout 300
+./go/portscan-go --host scanme.nmap.org --start 1 --end 1024 --workers 500 --timeout 300 --adaptive --retries 1
 ```
 
 - Rust scanner:
 
 ```bash
-./rust/target/release/portscan-rs --host scanme.nmap.org --start 1 --end 1024 --workers 500 --timeout 300
+./rust/target/release/portscan-rs --host scanme.nmap.org --start 1 --end 1024 --workers 500 --timeout 300 --adaptive --retries 1
 ```
 
 Add `--json` to either command for JSON output.

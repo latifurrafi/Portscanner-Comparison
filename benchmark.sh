@@ -80,7 +80,11 @@ echo "Using time binary: $TIME_BIN"
 
 OUT="benchmark_results.csv"
 : > "$OUT"
-echo "lang,bin,workers,run,wall_seconds,usr_sec,sys_sec,max_rss_kb,vol_ctx_switches,bin_size_bytes,open_ports_count" >> "$OUT"
+echo "lang,workers,second,memory_kb" >> "$OUT"
+
+# Scanner behavior flags (tweak as needed)
+RETRIES=${RETRIES:-1}
+ADAPTIVE_FLAG=${ADAPTIVE_FLAG:---adaptive}
 
 # Workers to test (tune as you like)
 WORKER_SET="50 200 500 1000 2000"
@@ -89,6 +93,12 @@ REPEATS=3
 for idx in "${!BINS[@]}"; do
   BIN="${BINS[idx]}"
   NAME="$(basename "$BIN")"
+  # map binary name to language label
+  case "$NAME" in
+    portscan-go) LANG=go ;;
+    portscan-rs) LANG=rust ;;
+    *) LANG="$NAME" ;;
+  esac
   BIN_SIZE=$(stat -c%s "$BIN" || stat -f%z "$BIN") # portable-ish
   for w in $WORKER_SET; do
     for run in $(seq 1 $REPEATS); do
@@ -100,25 +110,16 @@ for idx in "${!BINS[@]}"; do
       # Use --json if supported by binary (we try; if binary doesn't support it, it will ignore or error -> fallback)
       # We wrap in '|| true' to ensure we still capture time info even if the scanner returns non-zero.
       "$TIME_BIN" -f "%e %U %S %M %c" -o "$TIME_FILE" \
-        "$BIN" --host "$TARGET" --start "$START" --end "$END" --workers "$w" --timeout 300 --json \
-        > "$TMP_OUT" 2>/dev/null || "$TIME_BIN" -f "%e %U %S %M %c" -o "$TIME_FILE" "$BIN" --host "$TARGET" --start "$START" --end "$END" --workers "$w" --timeout 300 > "$TMP_OUT" 2>/dev/null || true
+        "$BIN" --host "$TARGET" --start "$START" --end "$END" --workers "$w" --timeout 300 "$ADAPTIVE_FLAG" --retries "$RETRIES" --json \
+        > "$TMP_OUT" 2>/dev/null || "$TIME_BIN" -f "%e %U %S %M %c" -o "$TIME_FILE" "$BIN" --host "$TARGET" --start "$START" --end "$END" --workers "$w" --timeout 300 "$ADAPTIVE_FLAG" --retries "$RETRIES" > "$TMP_OUT" 2>/dev/null || true
 
       # Read timing fields
       read wall usr sys maxrss volctx < "$TIME_FILE" || true
       rm -f "$TIME_FILE"
 
-      # Count open ports if output is JSON (jq optional)
-      if command -v jq >/dev/null 2>&1; then
-        OPEN_COUNT=$(jq '. | length' < "$TMP_OUT" 2>/dev/null || echo 0)
-      else
-        # try a naive grep for "open" in textual output as fallback
-        OPEN_COUNT=$(grep -Eo '"port":[[:space:]]*[0-9]+' "$TMP_OUT" 2>/dev/null | wc -l || true)
-        OPEN_COUNT=${OPEN_COUNT:-0}
-      fi
-
-      # Clean up and append to CSV
+      # Clean up and append to CSV (lang, workers, second, memory_kb)
       rm -f "$TMP_OUT"
-      echo "$NAME,$NAME,$w,$run,$wall,$usr,$sys,$maxrss,$volctx,$BIN_SIZE,$OPEN_COUNT" >> "$OUT"
+      echo "$LANG,$w,$wall,$maxrss" >> "$OUT"
     done
   done
 done
