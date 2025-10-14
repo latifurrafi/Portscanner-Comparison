@@ -1,0 +1,17 @@
+# Build artifacts
+rust/target/
+go/portscan-go
+go/portscan-epoll
+rust/target/release/portscan-rs
+
+# Cargo intermediates (covered by target/, but explicit for clarity)
+**/*.rlib
+**/*.rmeta
+**/*.d
+**/*.o
+**/*.a
+
+# Local outputs
+out.txt
+err.txt
+benchmark_results.csv
