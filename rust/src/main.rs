@@ -77,7 +77,6 @@ async fn main() {
         let handle = tokio::spawn(async move {
             // Acquire an owned permit; it releases automatically when dropped.
             let permit = sem_clone.acquire_owned().await.unwrap();
-            // permit is held for the lifetime of this async block (or until dropped)
             let addr = format!("{}:{}", ip_cloned, port);
 
             // attempt connect with timeout
@@ -89,13 +88,9 @@ async fn main() {
                         Ok(Ok(n)) if n > 0 => Some(String::from_utf8_lossy(&buf[..n]).to_string()),
                         _ => None,
                     };
-                    // permit dropped here when goes out of scope
-                    drop(permit);
                     ResultRec { port, status: "open", banner }
                 }
                 _ => {
-                    // permit dropped here
-                    drop(permit);
                     ResultRec { port, status: "closed", banner: None }
                 }
             }

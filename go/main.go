@@ -2,16 +2,15 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"flag"
-	"fmt"
-	"net"
-	"os"
-	"sort"
-	"strconv"
-	"sync"
-	"time"
+    "encoding/json"
+    "flag"
+    "fmt"
+    "net"
+    "os"
+    "sort"
+    "strconv"
+    "sync"
+    "time"
 )
 
 type Result struct {
@@ -20,41 +19,25 @@ type Result struct {
 	Banner string `json:"banner,omitempty"`
 }
 
-func worker(ctx context.Context, ip string, ports <-chan int, results chan<- Result, wg *sync.WaitGroup, timeout time.Duration, sem chan struct{}) {
-	defer wg.Done()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case p, ok := <-ports:
-			if !ok {
-				return
-			}
-			// Acquire semaphore slot
-			sem <- struct{}{}
-			func(port int) {
-				defer func() { <-sem }()
-				address := net.JoinHostPort(ip, strconv.Itoa(port))
-				// Try to connect
-				conn, err := net.DialTimeout("tcp", address, timeout)
-				if err != nil {
-					results <- Result{Port: port, Status: "closed"}
-					return
-				}
-				// Connected -> port open
-				// Try a tiny read to grab banner (non-blocking-ish)
-				_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
-				buf := make([]byte, 256)
-				n, _ := conn.Read(buf)
-				banner := ""
-				if n > 0 {
-					banner = string(buf[:n])
-				}
-				conn.Close()
-				results <- Result{Port: port, Status: "open", Banner: banner}
-			}(p)
-		}
-	}
+func worker(ip string, ports <-chan int, results chan<- Result, wg *sync.WaitGroup, timeout time.Duration) {
+    defer wg.Done()
+    for p := range ports {
+        address := net.JoinHostPort(ip, strconv.Itoa(p))
+        conn, err := net.DialTimeout("tcp", address, timeout)
+        if err != nil {
+            results <- Result{Port: p, Status: "closed"}
+            continue
+        }
+        _ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+        buf := make([]byte, 256)
+        n, _ := conn.Read(buf)
+        banner := ""
+        if n > 0 {
+            banner = string(buf[:n])
+        }
+        conn.Close()
+        results <- Result{Port: p, Status: "open", Banner: banner}
+    }
 }
 
 func main() {
@@ -86,31 +69,26 @@ func main() {
 		fmt.Fprintln(os.Stderr, "end must be >= start")
 		os.Exit(2)
 	}
-	ips, err := net.LookupHost(host)
+    ips, err := net.LookupHost(host)
 	if err != nil || len(ips) == 0 {
 		fmt.Fprintf(os.Stderr, "failed to resolve host: %v\n", err)
 		os.Exit(1)
 	}
 	ip := ips[0]
 
-	portsCh := make(chan int, 1000)
-	resultsCh := make(chan Result, 1000)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+    portsCh := make(chan int, 1000)
+    resultsCh := make(chan Result, 1000)
 
-	var wg sync.WaitGroup
+    var wg sync.WaitGroup
 
-	// semaphore to limit simultaneous net.Dial calls (controls OS resources)
-	sem := make(chan struct{}, workers)
-
-	// Spawn a small pool of worker goroutines
+    // Spawn worker goroutines (limited by workers flag)
 	numWorkers := workers
 	if numWorkers < 1 {
 		numWorkers = 100
 	}
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
-		go worker(ctx, ip, portsCh, resultsCh, &wg, time.Duration(timeoutMs)*time.Millisecond, sem)
+        go worker(ip, portsCh, resultsCh, &wg, time.Duration(timeoutMs)*time.Millisecond)
 	}
 
 	// feed ports
@@ -121,21 +99,15 @@ func main() {
 		close(portsCh)
 	}()
 
-	// collector
-	var resList []Result
-	var collectWg sync.WaitGroup
-	collectWg.Add(1)
-	go func() {
-		defer collectWg.Done()
-		for r := range resultsCh {
-			resList = append(resList, r)
-		}
-	}()
+    // Wait for workers to finish and close results
+    wg.Wait()
+    close(resultsCh)
 
-	// Wait for workers to finish and close results
-	wg.Wait()
-	close(resultsCh)
-	collectWg.Wait()
+    // Collect results after channel is closed
+    var resList []Result
+    for r := range resultsCh {
+        resList = append(resList, r)
+    }
 
 	// sort by port
 	sort.Slice(resList, func(i, j int) bool { return resList[i].Port < resList[j].Port })

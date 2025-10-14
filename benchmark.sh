@@ -1,87 +1,10 @@
-# #!/usr/bin/env bash
-# # benchmark.sh — Compare Go vs Rust port scanners
-# # Usage: ./benchmark.sh <target-host> [start] [end]
-# # Example: ./benchmark.sh 127.0.0.1 1 1024
-
-# set -euo pipefail
-
-# TARGET=${1:-}
-# START=${2:-1}
-# END=${3:-1024}
-
-# if [ -z "$TARGET" ]; then
-#   echo "Usage: $0 <target-host> [start] [end]"
-#   exit 2
-# fi
-
-# GO_BIN="./go/portscan-go"
-# RS_BIN="./rust/target/release/portscan-rs"
-
-# # Check if both binaries exist
-# if [ ! -x "$GO_BIN" ] || [ ! -x "$RS_BIN" ]; then
-#   echo "Error: Binaries not found."
-#   echo "Build them first:"
-#   echo "  cd go && go build -ldflags \"-s -w\" -o portscan-go main.go"
-#   echo "  cd rust && cargo build --release"
-#   exit 2
-# fi
-
-# # Output CSV file — ensure it's properly defined before writing
-# OUT="benchmark_results.csv"
-# : > "$OUT"  # safely truncate or create the file
-
-# # Write header
-# echo "lang,workers,run,wall_seconds,usr_sec,sys_sec,max_rss_kb,vol_ctx_switches,bin_size_bytes,open_ports_count" >> "$OUT"
-
-# WORKER_SET="50 200 500 1000"
-# REPEATS=2  # reduce repeats to speed up demo runs
-
-# for lang in go rust; do
-#   BIN="$([ "$lang" = go ] && echo "$GO_BIN" || echo "$RS_BIN")"
-#   BIN_SIZE=$(stat -c%s "$BIN")
-
-#   for w in $WORKER_SET; do
-#     for run in $(seq 1 $REPEATS); do
-#       echo "Running $lang workers=$w run=$run ..."
-#       TMP_OUT=$(mktemp)
-#       TIME_FILE=$(mktemp)
-
-#       # Use /usr/bin/time to measure time and memory
-#       /usr/bin/time -f "%e %U %S %M %c" -o "$TIME_FILE" \
-#         "$BIN" --host "$TARGET" --start "$START" --end "$END" \
-#         --workers "$w" --timeout 300 --json > "$TMP_OUT" 2>/dev/null || true
-
-#       read wall usr sys maxrss volctx < "$TIME_FILE" || true
-#       rm -f "$TIME_FILE"
-
-#       # Count number of open ports from JSON (needs jq)
-#       if command -v jq >/dev/null 2>&1; then
-#         OPEN_COUNT=$(jq '. | length' < "$TMP_OUT" 2>/dev/null || echo 0)
-#       else
-#         OPEN_COUNT=0
-#       fi
-
-#       rm -f "$TMP_OUT"
-
-#       echo "$lang,$w,$run,$wall,$usr,$sys,$maxrss,$volctx,$BIN_SIZE,$OPEN_COUNT" >> "$OUT"
-#     done
-#   done
-# done
-
-# echo "✅ Done. Results saved in: $OUT"
-# echo "You can open it in Excel, LibreOffice, or Python for analysis."
-
-
-
-
 #!/usr/bin/env bash
-# benchmark.sh — Compare available scanner binaries (Go goroutine, Go epoll, Rust)
+# benchmark.sh — Compare available scanner binaries (Go goroutine, Rust)
 # Usage: ./benchmark.sh <target-host> [start] [end]
 # Example: ./benchmark.sh 127.0.0.1 1 1024
 #
 # This script will look for:
 #  - ./go/portscan-go        (goroutine-based Go scanner)
-#  - ./go/portscan-epoll    (epoll-based Go scanner, Linux only)
 #  - ./rust/target/release/portscan-rs (Rust scanner)
 #
 # It requires GNU time (usually /usr/bin/time) or gtime (macOS via brew).
@@ -100,7 +23,6 @@ fi
 # Candidate binaries (relative paths)
 CANDIDATES=(
   "./go/portscan-go"        # Go goroutine scanner
-  "./go/portscan-epoll"    # Go epoll (Linux-only) scanner
   "./rust/target/release/portscan-rs"  # Rust scanner
 )
 
@@ -130,10 +52,25 @@ for p in "${CANDIDATES[@]}"; do
   fi
 done
 
+# Probe candidates with --help to ensure they are runnable
+RUNNABLE_BINS=()
+RUNNABLE_NAMES=()
+for i in "${!BINS[@]}"; do
+  bin="${BINS[i]}"
+  name="${BIN_NAMES[i]}"
+  if "$bin" --help >/dev/null 2>&1; then
+    RUNNABLE_BINS+=("$bin")
+    RUNNABLE_NAMES+=("$name")
+  else
+    echo "Skipping $name: not runnable (failed --help probe)"
+  fi
+done
+BINS=("${RUNNABLE_BINS[@]}")
+BIN_NAMES=("${RUNNABLE_NAMES[@]}")
+
 if [ ${#BINS[@]} -eq 0 ]; then
-  echo "No scanner binaries found. Build at least one of:"
+  echo "No runnable scanner binaries found. Build at least one of:"
   echo "  cd go && go build -ldflags \"-s -w\" -o portscan-go main.go"
-  echo "  cd go && GOOS=linux go build -o portscan-epoll main.go   # epoll (Linux)"
   echo "  cd rust && cargo build --release"
   exit 2
 fi
