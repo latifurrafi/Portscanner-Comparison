@@ -60,6 +60,10 @@ struct Args {
     /// enable adaptive timeout based on RTT probing
     #[arg(long, default_value_t = true)]
     adaptive: bool,
+
+    /// optimize settings for public internet targets
+    #[arg(long, default_value_t = false)]
+    fast_public: bool,
 }
 
 #[derive(Serialize)]
@@ -96,10 +100,17 @@ async fn main() {
 
     // Derive dial timeout: optionally adaptive based on quick probes
     let base_timeout = Duration::from_millis(args.timeout);
-    let timeout_dur = if args.adaptive { estimate_timeout(&ip, base_timeout) } else { base_timeout };
+    let mut timeout_dur = if args.adaptive && !args.fast_public { estimate_timeout(&ip, base_timeout) } else { base_timeout };
+    let mut workers = args.workers;
+    let mut retries = args.retries;
+    if args.fast_public {
+        if timeout_dur > Duration::from_millis(80) { timeout_dur = Duration::from_millis(80); }
+        if retries > 0 { retries = 0; }
+        if workers < 2000 { workers = 2000; }
+    }
 
     // Wrap semaphore in Arc so it can be cheaply cloned between tasks
-    let sem = Arc::new(Semaphore::new(args.workers));
+    let sem = Arc::new(Semaphore::new(workers));
     let mut handles = Vec::new();
 
     for port in args.start..=args.end {
@@ -113,12 +124,12 @@ async fn main() {
             let addr = format!("{}:{}", ip_cloned, port);
 
             // attempt connect with timeout + retries on timeout
-            let attempts = args.retries + 1;
+            let attempts = retries + 1;
             for try_idx in 0..attempts {
                 match timeout(timeout_dur, TcpStream::connect(&addr)).await {
                     Ok(Ok(mut stream)) => {
                         let mut buf = [0u8; 256];
-                        let banner = match timeout(Duration::from_millis(200), stream.read(&mut buf)).await {
+                        let banner = match timeout(Duration::from_millis(50), stream.read(&mut buf)).await {
                             Ok(Ok(n)) if n > 0 => Some(String::from_utf8_lossy(&buf[..n]).to_string()),
                             _ => None,
                         };
@@ -143,7 +154,24 @@ async fn main() {
     }
 
     results.sort_by_key(|r| r.port);
-    let open: Vec<_> = results.into_iter().filter(|r| r.status == "open").collect();
+    let mut open: Vec<_> = results.into_iter().filter(|r| r.status == "open").collect();
+
+    // Fallback probe for common ports with a longer timeout if nothing found
+    if open.is_empty() {
+        let common = [22u16, 80u16];
+        for &p in &common {
+            let addr = format!("{}:{}", args.host, p);
+            if let Ok(Ok(mut stream)) = timeout(Duration::from_millis(1000), TcpStream::connect(&addr)).await {
+                let mut buf = [0u8; 256];
+                let banner = match timeout(Duration::from_millis(100), stream.read(&mut buf)).await {
+                    Ok(Ok(n)) if n > 0 => Some(String::from_utf8_lossy(&buf[..n]).to_string()),
+                    _ => None,
+                };
+                open.push(ResultRec { port: p, status: "open", banner });
+            }
+        }
+    }
+
     let open_len = open.len();
 
     if args.json {

@@ -85,6 +85,15 @@ echo "lang,workers,second,memory_kb" >> "$OUT"
 # Scanner behavior flags (tweak as needed)
 RETRIES=${RETRIES:-1}
 ADAPTIVE_FLAG=${ADAPTIVE_FLAG:---adaptive}
+# Per-connection timeout in ms used by scanners (env-overridable)
+TIMEOUT_MS=${TIMEOUT_MS:-300}
+# Fast public mode (env-overridable) -> adds --fast-public to binaries
+FAST_PUBLIC=${FAST_PUBLIC:-0}
+FAST_FLAG=""
+if [ "$FAST_PUBLIC" = "1" ] || [ "$FAST_PUBLIC" = "true" ]; then
+  FAST_FLAG="--fast-public"
+  ADAPTIVE_FLAG="--no-adaptive"
+fi
 
 # Workers to test (tune as you like)
 WORKER_SET="50 200 500 1000 2000"
@@ -106,15 +115,27 @@ for idx in "${!BINS[@]}"; do
       TMP_OUT=$(mktemp)
       TIME_FILE=$(mktemp)
 
-      # Run scanner; redirect JSON/text to TMP_OUT
+      # Run scanner; measure high-precision wall time ourselves and use GNU time only for max RSS
+      start_ns=$(date +%s%N)
       # Use --json if supported by binary (we try; if binary doesn't support it, it will ignore or error -> fallback)
-      # We wrap in '|| true' to ensure we still capture time info even if the scanner returns non-zero.
-      "$TIME_BIN" -f "%e %U %S %M %c" -o "$TIME_FILE" \
-        "$BIN" --host "$TARGET" --start "$START" --end "$END" --workers "$w" --timeout 300 "$ADAPTIVE_FLAG" --retries "$RETRIES" --json \
-        > "$TMP_OUT" 2>/dev/null || "$TIME_BIN" -f "%e %U %S %M %c" -o "$TIME_FILE" "$BIN" --host "$TARGET" --start "$START" --end "$END" --workers "$w" --timeout 300 "$ADAPTIVE_FLAG" --retries "$RETRIES" > "$TMP_OUT" 2>/dev/null || true
+      # We wrap in '|| true' to ensure we still capture memory info even if the scanner returns non-zero.
+      "$TIME_BIN" -f "%M" -o "$TIME_FILE" \
+        "$BIN" --host "$TARGET" --start "$START" --end "$END" --workers "$w" --timeout "$TIMEOUT_MS" "$ADAPTIVE_FLAG" $FAST_FLAG --retries "$RETRIES" --json \
+        > "$TMP_OUT" 2>/dev/null || "$TIME_BIN" -f "%M" -o "$TIME_FILE" "$BIN" --host "$TARGET" --start "$START" --end "$END" --workers "$w" --timeout "$TIMEOUT_MS" "$ADAPTIVE_FLAG" --retries "$RETRIES" > "$TMP_OUT" 2>/dev/null || true
+      # fallback path without --json
+      if [ ! -s "$TMP_OUT" ]; then
+        "$TIME_BIN" -f "%M" -o "$TIME_FILE" \
+          "$BIN" --host "$TARGET" --start "$START" --end "$END" --workers "$w" --timeout "$TIMEOUT_MS" "$ADAPTIVE_FLAG" $FAST_FLAG --retries "$RETRIES" \
+          > "$TMP_OUT" 2>/dev/null || true
+      fi
+      end_ns=$(date +%s%N)
 
-      # Read timing fields
-      read wall usr sys maxrss volctx < "$TIME_FILE" || true
+      # Compute precise elapsed seconds with microsecond precision
+      elapsed_ns=$((end_ns - start_ns))
+      wall=$(awk -v ns="$elapsed_ns" 'BEGIN { printf "%.6f", ns/1000000000 }')
+
+      # Read max resident set size (KB)
+      read maxrss < "$TIME_FILE" || true
       rm -f "$TIME_FILE"
 
       # Clean up and append to CSV (lang, workers, second, memory_kb)
